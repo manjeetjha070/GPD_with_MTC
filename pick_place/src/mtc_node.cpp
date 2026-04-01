@@ -30,7 +30,7 @@ public:
 
   void setupPlanningScene();
   std::string open = "Open";
-  std::string close = "Close"; 
+  std::string close = "Close";
   std::string home = "Home";
 
 private:
@@ -109,7 +109,7 @@ mtc::Task MTCTaskNode::createTask()
   // const auto& arm_group_name = "panda_arm";
   // const auto& hand_group_name = "hand";
   // const auto& hand_frame = "panda_hand";
-  
+
   const auto& arm_group_name = "manipulator";
   const auto& hand_group_name = "gripper";
   const auto& hand_frame = "end_effector_link";
@@ -119,9 +119,9 @@ mtc::Task MTCTaskNode::createTask()
   task.setProperty("eef", hand_group_name);
   task.setProperty("ik_frame", hand_frame);
 
-  mtc::Stage* current_state_ptr = nullptr;  // Forward current_state on to grasp pose generator
+  //mtc::Stage* current_state_ptr = nullptr;  // Forward current_state on to grasp pose generator (use this with grasp_pose_generator stage)
   auto stage_state_current = std::make_unique<mtc::stages::CurrentState>("current");
-  current_state_ptr = stage_state_current.get();
+  //current_state_ptr = stage_state_current.get();
   task.add(std::move(stage_state_current));
 
   auto sampling_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_);
@@ -135,10 +135,13 @@ mtc::Task MTCTaskNode::createTask()
   // clang-format off
   auto stage_open_hand =
       std::make_unique<mtc::stages::MoveTo>("open hand", interpolation_planner);
+  mtc::Stage* open_state_ptr = nullptr;  // Forward current_state on to pose generator (use this with pose_generator stage)
+  open_state_ptr = stage_open_hand.get();
   // clang-format on
   stage_open_hand->setGroup(hand_group_name);
   stage_open_hand->setGoal(open);
   task.add(std::move(stage_open_hand));
+
 
   // clang-format off
   auto stage_move_to_pick = std::make_unique<mtc::stages::Connect>(
@@ -185,63 +188,15 @@ mtc::Task MTCTaskNode::createTask()
     /****************************************************
   ---- *               Generate Grasp Pose                *
      ***************************************************/
-    {
-      // Sample grasp pose
-      auto stage = std::make_unique<mtc::stages::GenerateGraspPose>("generate grasp pose");
-      stage->properties().configureInitFrom(mtc::Stage::PARENT);
-      stage->properties().set("marker_ns", "grasp_pose");
-      stage->setPreGraspPose(open);
-      stage->setObject("object");
-      stage->setAngleDelta(M_PI / 12);
-      stage->setMonitoredStage(current_state_ptr);  // Hook into current state
-
-      // This is the transform from the object frame to the end-effector frame
-      Eigen::Isometry3d grasp_frame_transform;
-      Eigen::Quaterniond q = Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
-                             Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
-                             Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitZ());
-      grasp_frame_transform.linear() = q.matrix();
-      grasp_frame_transform.translation().z() = 0.14;
-
-      // Compute IK
-      // clang-format off
-      auto wrapper =
-          std::make_unique<mtc::stages::ComputeIK>("grasp pose IK", std::move(stage));
-      // clang-format on
-      wrapper->setMaxIKSolutions(8);
-      wrapper->setMinSolutionDistance(1.0);
-      wrapper->setIKFrame(grasp_frame_transform, hand_frame);
-      wrapper->properties().configureInitFrom(mtc::Stage::PARENT, { "eef", "group" });
-      wrapper->properties().configureInitFrom(mtc::Stage::INTERFACE, { "target_pose" });
-      grasp->insert(std::move(wrapper));
-    }
-
-    /****************************************************
-  ---- *            Use a Fixed GPD Grasp Pose           *
-     ***************************************************/
-
     // {
     //   // Sample grasp pose
-    //   auto stage = std::make_unique<mtc::stages::GeneratePose>("generate grasp pose");
+    //   auto stage = std::make_unique<mtc::stages::GenerateGraspPose>("generate grasp pose");
     //   stage->properties().configureInitFrom(mtc::Stage::PARENT);
     //   stage->properties().set("marker_ns", "grasp_pose");
-    //   // stage->setPreGraspPose(open);
-    //   // stage->setObject("object");
-    //   // stage->setAngleDelta(M_PI / 12);
+    //   stage->setPreGraspPose(open);
+    //   stage->setObject("object");
+    //   stage->setAngleDelta(M_PI / 12);
     //   stage->setMonitoredStage(current_state_ptr);  // Hook into current state
-
-    //   geometry_msgs::msg::PoseStamped gpd_grasp_pose;
-    //   gpd_grasp_pose.header.stamp = node_->now();
-    //   gpd_grasp_pose.header.frame_id = "world";
-    //   gpd_grasp_pose.pose.position.x = 0.36;
-    //   gpd_grasp_pose.pose.position.y = -0.25;
-    //   gpd_grasp_pose.pose.position.z = 0.1;
-    //   gpd_grasp_pose.pose.orientation.x = 0.0;
-    //   gpd_grasp_pose.pose.orientation.y = 0.0;
-    //   gpd_grasp_pose.pose.orientation.z = 0.0;
-    //   gpd_grasp_pose.pose.orientation.w = 1.0;
-    //   stage->setPose(gpd_grasp_pose);
-
 
     //   // This is the transform from the object frame to the end-effector frame
     //   Eigen::Isometry3d grasp_frame_transform;
@@ -249,7 +204,7 @@ mtc::Task MTCTaskNode::createTask()
     //                          Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
     //                          Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitZ());
     //   grasp_frame_transform.linear() = q.matrix();
-    //   // grasp_frame_transform.translation().z() = 0.1;
+    //   grasp_frame_transform.translation().z() = 0.14;
 
     //   // Compute IK
     //   // clang-format off
@@ -263,6 +218,53 @@ mtc::Task MTCTaskNode::createTask()
     //   wrapper->properties().configureInitFrom(mtc::Stage::INTERFACE, { "target_pose" });
     //   grasp->insert(std::move(wrapper));
     // }
+
+    /****************************************************
+  ---- *            Use a Fixed GPD Grasp Pose           *
+     ***************************************************/
+
+    {
+      // Sample grasp pose
+      auto stage = std::make_unique<mtc::stages::GeneratePose>("generate grasp pose");
+      stage->properties().configureInitFrom(mtc::Stage::PARENT);
+      stage->properties().set("marker_ns", "grasp_pose");
+      //stage->setMonitoredStage(current_state_ptr);  // Hook into current state
+      stage->setMonitoredStage (open_state_ptr); // Hook into open state
+
+
+      geometry_msgs::msg::PoseStamped gpd_grasp_pose;
+      gpd_grasp_pose.header.stamp = node_->now();
+      gpd_grasp_pose.header.frame_id = "world";
+      gpd_grasp_pose.pose.position.x = 0.36;
+      gpd_grasp_pose.pose.position.y = -0.25;
+      gpd_grasp_pose.pose.position.z = 0.01;
+      gpd_grasp_pose.pose.orientation.x = 0.0;
+      gpd_grasp_pose.pose.orientation.y = 0.0;
+      gpd_grasp_pose.pose.orientation.z = 0.0;
+      gpd_grasp_pose.pose.orientation.w = 1.0;
+      stage->setPose(gpd_grasp_pose);
+
+
+      // This is the transform from the object frame to the end-effector frame
+      Eigen::Isometry3d grasp_frame_transform;
+      Eigen::Quaterniond q = Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
+                             Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
+                             Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitZ());
+      grasp_frame_transform.linear() = q.matrix();
+      // grasp_frame_transform.translation().z() = 0.1;
+
+      // Compute IK
+      // clang-format off
+      auto wrapper =
+          std::make_unique<mtc::stages::ComputeIK>("grasp pose IK", std::move(stage));
+      // clang-format on
+      wrapper->setMaxIKSolutions(8);
+      wrapper->setMinSolutionDistance(1.0);
+      wrapper->setIKFrame(grasp_frame_transform, hand_frame);
+      wrapper->properties().configureInitFrom(mtc::Stage::PARENT, { "eef", "group" });
+      wrapper->properties().configureInitFrom(mtc::Stage::INTERFACE, { "target_pose" });
+      grasp->insert(std::move(wrapper));
+    }
 
 
 
