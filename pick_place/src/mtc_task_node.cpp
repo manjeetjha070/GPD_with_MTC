@@ -18,20 +18,64 @@
 #endif
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <visualization_msgs/msg/marker.hpp>
 
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("mtc_tutorial");
 
 // ================= CONSTRUCTOR =================
 MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
-  : node_{ std::make_shared<rclcpp::Node>("mtc_node", options) }
+  : rclcpp::Node("mtc_node", options), tf_buffer_(this->get_clock()), tf_listener_(tf_buffer_)
 {
+  this->declare_parameter("velocity_scaling", 0.1);
+  this->declare_parameter("acceleration_scaling", 0.1);
+
+  grasps_sub_ = this->create_subscription<gpd_ros::msg::GraspConfigList>(
+      "clustered_grasps", 10, std::bind(&MTCTaskNode::graspsCallback, this, std::placeholders::_1));
 }
 
-// ================= NODE INTERFACE =================
-rclcpp::node_interfaces::NodeBaseInterface::SharedPtr
-MTCTaskNode::getNodeBaseInterface()
+// ================= GRASPS CALLBACK =================
+void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr msg)
 {
-  return node_->get_node_base_interface();
+  if (msg->grasps.empty()) {
+    RCLCPP_WARN(LOGGER, "No grasps received");
+    return;
+  }
+
+  try {
+    // Find the grasp with the highest score
+    auto best_grasp = std::max_element(msg->grasps.begin(), msg->grasps.end(),
+                                       [](const auto& a, const auto& b) {
+                                         return a.score.data < b.score.data;
+                                       });
+
+    geometry_msgs::msg::PoseStamped pose_in;
+    pose_in.header = msg->header;
+    pose_in.pose.position = best_grasp->position;
+
+    // Construct orientation from approach, binormal, axis
+    Eigen::Matrix3d rot;
+    rot.col(0) = Eigen::Vector3d(best_grasp->approach.x, best_grasp->approach.y, best_grasp->approach.z);
+    rot.col(1) = Eigen::Vector3d(best_grasp->binormal.x, best_grasp->binormal.y, best_grasp->binormal.z);
+    rot.col(2) = Eigen::Vector3d(best_grasp->axis.x, best_grasp->axis.y, best_grasp->axis.z);
+    
+
+    Eigen::Quaterniond q(rot);
+    pose_in.pose.orientation = tf2::toMsg(q);
+
+    // Transform to world frame
+    geometry_msgs::msg::PoseStamped pose_out;
+    tf_buffer_.transform(pose_in, pose_out, "world");
+
+    latest_grasp_pose_ = pose_out;
+
+    // Update planning scene and execute task
+    setupPlanningScene();
+    doTask();
+  } catch (tf2::TransformException &ex) {
+    RCLCPP_WARN(LOGGER, "Could not transform pose: %s", ex.what());
+  }
 }
 
 // ================= PLANNING SCENE =================
@@ -45,12 +89,12 @@ void MTCTaskNode::setupPlanningScene()
   object.primitives[0].type = shape_msgs::msg::SolidPrimitive::CYLINDER;
   object.primitives[0].dimensions = { 0.1, 0.02 };
 
-  geometry_msgs::msg::Pose pose;
-  pose.position.x = 0.5;
-  pose.position.y = -0.25;
-  pose.orientation.w = 1.0;
-
-  object.pose = pose;
+  // Use the latest grasp pose for the object pose, but offset x by 0.14
+  // object.pose = latest_grasp_pose_.pose;
+  object.pose.position.x = latest_grasp_pose_.pose.position.x+ 0.14;
+  object.pose.position.y = latest_grasp_pose_.pose.position.y;
+  object.pose.position.z = latest_grasp_pose_.pose.position.z;
+  object.pose.orientation.w = 1.0;
 
   moveit::planning_interface::PlanningSceneInterface psi;
   psi.applyCollisionObject(object);
@@ -87,11 +131,13 @@ mtc::Task MTCTaskNode::createTask()
   
   mtc::Task task;
   task.stages()->setName("demo task");
-  task.loadRobotModel(node_);
+  task.loadRobotModel(this->shared_from_this());
 
-  // const auto& arm_group_name = "panda_arm";
-  // const auto& hand_group_name = "hand";
-  // const auto& hand_frame = "panda_hand";
+  double velocity_scaling =
+    this->get_parameter("velocity_scaling").as_double();
+
+  double acceleration_scaling =
+    this->get_parameter("acceleration_scaling").as_double();
 
   const auto& arm_group_name = "manipulator";
   const auto& hand_group_name = "gripper";
@@ -107,12 +153,14 @@ mtc::Task MTCTaskNode::createTask()
   //current_state_ptr = stage_state_current.get();
   task.add(std::move(stage_state_current));
 
-  auto sampling_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_);
+  auto sampling_planner = std::make_shared<mtc::solvers::PipelinePlanner>(this->shared_from_this());
+  sampling_planner->setMaxVelocityScalingFactor(velocity_scaling);
+  sampling_planner->setMaxAccelerationScalingFactor(acceleration_scaling);
   auto interpolation_planner = std::make_shared<mtc::solvers::JointInterpolationPlanner>();
 
   auto cartesian_planner = std::make_shared<mtc::solvers::CartesianPath>();
-  cartesian_planner->setMaxVelocityScalingFactor(1.0);
-  cartesian_planner->setMaxAccelerationScalingFactor(1.0);
+  cartesian_planner->setMaxVelocityScalingFactor(velocity_scaling);
+  cartesian_planner->setMaxAccelerationScalingFactor(acceleration_scaling);
   cartesian_planner->setStepSize(.01);
 
   // clang-format off
@@ -214,18 +262,8 @@ mtc::Task MTCTaskNode::createTask()
       //stage->setMonitoredStage(current_state_ptr);  // Hook into current state
       stage->setMonitoredStage (open_state_ptr); // Hook into open state
 
-
-      geometry_msgs::msg::PoseStamped gpd_grasp_pose;
-      gpd_grasp_pose.header.stamp = node_->now();
-      gpd_grasp_pose.header.frame_id = "world";
-      gpd_grasp_pose.pose.position.x = 0.36;
-      gpd_grasp_pose.pose.position.y = -0.25;
-      gpd_grasp_pose.pose.position.z = 0.01;
-      gpd_grasp_pose.pose.orientation.x = 0.0;
-      gpd_grasp_pose.pose.orientation.y = 0.0;
-      gpd_grasp_pose.pose.orientation.z = 0.0;
-      gpd_grasp_pose.pose.orientation.w = 1.0;
-      stage->setPose(gpd_grasp_pose);
+      // Use the latest grasp pose from the marker
+      stage->setPose(latest_grasp_pose_);
 
 
       // This is the transform from the object frame to the end-effector frame

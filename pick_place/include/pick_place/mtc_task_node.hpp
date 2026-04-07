@@ -2,24 +2,30 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <moveit/task_constructor/task.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <gpd_ros/msg/grasp_config_list.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 
 namespace mtc = moveit::task_constructor;
 
-class MTCTaskNode
+class MTCTaskNode : public rclcpp::Node
 {
 public:
   MTCTaskNode(const rclcpp::NodeOptions& options);
-
-  rclcpp::node_interfaces::NodeBaseInterface::SharedPtr getNodeBaseInterface();
 
   void doTask();
   void setupPlanningScene();
 
 private:
   mtc::Task createTask();
+  void graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr msg);
 
   mtc::Task task_;
-  rclcpp::Node::SharedPtr node_;
+  tf2_ros::Buffer tf_buffer_;
+  tf2_ros::TransformListener tf_listener_;
+  geometry_msgs::msg::PoseStamped latest_grasp_pose_;
+  rclcpp::Subscription<gpd_ros::msg::GraspConfigList>::SharedPtr grasps_sub_;
 
   std::string open = "Open";
   std::string close = "Close";
