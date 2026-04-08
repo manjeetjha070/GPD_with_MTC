@@ -25,6 +25,7 @@ private:
   tf2_ros::Buffer tf_buffer_;
   tf2_ros::TransformListener tf_listener_;
   geometry_msgs::msg::PoseStamped latest_grasp_pose_;
+  geometry_msgs::msg::PoseStamped latest_grasp_pose_object_;
   rclcpp::Subscription<gpd_ros::msg::GraspConfigList>::SharedPtr grasps_sub_;
 
   std::string open = "Open";

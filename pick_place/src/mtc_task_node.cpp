@@ -54,21 +54,38 @@ void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr 
     pose_in.header = msg->header;
     pose_in.pose.position = best_grasp->position;
 
-    // Construct orientation from approach, binormal, axis
+    geometry_msgs::msg::PoseStamped pose_in_object;
+    pose_in_object.header = msg->header;
+    pose_in_object.pose.position = best_grasp->position;
+
+    // Construct orientation from approach, binormal, axis for grasp pose
     Eigen::Matrix3d rot;
-    rot.col(0) = Eigen::Vector3d(best_grasp->approach.x, best_grasp->approach.y, best_grasp->approach.z);
-    rot.col(1) = Eigen::Vector3d(best_grasp->binormal.x, best_grasp->binormal.y, best_grasp->binormal.z);
-    rot.col(2) = Eigen::Vector3d(best_grasp->axis.x, best_grasp->axis.y, best_grasp->axis.z);
+    rot.col(0) = Eigen::Vector3d(best_grasp->axis.x, best_grasp->axis.y, best_grasp->axis.z);
+    rot.col(1) = Eigen::Vector3d(best_grasp->approach.x, best_grasp->approach.y, best_grasp->approach.z);
+    rot.col(2) = Eigen::Vector3d(best_grasp->binormal.x, best_grasp->binormal.y, best_grasp->binormal.z);
+
+    // Construct orientation from approach, binormal, axis for object pose
+    Eigen::Matrix3d rot_object;
+    rot_object.col(0) = Eigen::Vector3d(best_grasp->approach.x, best_grasp->approach.y, best_grasp->approach.z);
+    rot_object.col(1) = Eigen::Vector3d(best_grasp->binormal.x, best_grasp->binormal.y, best_grasp->binormal.z);
+    rot_object.col(2) = Eigen::Vector3d(best_grasp->axis.x, best_grasp->axis.y, best_grasp->axis.z);
     
 
     Eigen::Quaterniond q(rot);
     pose_in.pose.orientation = tf2::toMsg(q);
 
+    Eigen::Quaterniond q_object(rot_object);
+    pose_in_object.pose.orientation = tf2::toMsg(q_object);
+
     // Transform to world frame
     geometry_msgs::msg::PoseStamped pose_out;
     tf_buffer_.transform(pose_in, pose_out, "world");
 
+    geometry_msgs::msg::PoseStamped pose_out_object;
+    tf_buffer_.transform(pose_in_object, pose_out_object, "world");
+
     latest_grasp_pose_ = pose_out;
+    latest_grasp_pose_object_ = pose_out_object;
 
     // Update planning scene and execute task
     setupPlanningScene();
@@ -90,11 +107,9 @@ void MTCTaskNode::setupPlanningScene()
   object.primitives[0].dimensions = { 0.1, 0.02 };
 
   // Use the latest grasp pose for the object pose, but offset x by 0.14
-  // object.pose = latest_grasp_pose_.pose;
-  object.pose.position.x = latest_grasp_pose_.pose.position.x+ 0.14;
-  object.pose.position.y = latest_grasp_pose_.pose.position.y;
-  object.pose.position.z = latest_grasp_pose_.pose.position.z;
-  object.pose.orientation.w = 1.0;
+  object.pose = latest_grasp_pose_object_.pose;
+  object.pose.position.x = latest_grasp_pose_object_.pose.position.x + 0.14;
+
 
   moveit::planning_interface::PlanningSceneInterface psi;
   psi.applyCollisionObject(object);
@@ -267,21 +282,20 @@ mtc::Task MTCTaskNode::createTask()
 
 
       // This is the transform from the object frame to the end-effector frame
-      Eigen::Isometry3d grasp_frame_transform;
-      Eigen::Quaterniond q = Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
-                             Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
-                             Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitZ());
-      grasp_frame_transform.linear() = q.matrix();
+      // Eigen::Isometry3d grasp_frame_transform;
+      // Eigen::Quaterniond q = Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
+      //                        Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
+      //                        Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitZ());
+      // grasp_frame_transform.linear() = q.matrix();
       // grasp_frame_transform.translation().z() = 0.1;
 
-      // Compute IK
-      // clang-format off
+      // Compute IK      
       auto wrapper =
           std::make_unique<mtc::stages::ComputeIK>("grasp pose IK", std::move(stage));
       // clang-format on
       wrapper->setMaxIKSolutions(8);
       wrapper->setMinSolutionDistance(1.0);
-      wrapper->setIKFrame(grasp_frame_transform, hand_frame);
+      wrapper->setIKFrame(hand_frame);
       wrapper->properties().configureInitFrom(mtc::Stage::PARENT, { "eef", "group" });
       wrapper->properties().configureInitFrom(mtc::Stage::INTERFACE, { "target_pose" });
       grasp->insert(std::move(wrapper));
