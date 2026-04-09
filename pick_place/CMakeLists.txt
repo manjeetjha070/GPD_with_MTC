@@ -15,6 +15,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(gpd_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
+find_package(parameter_traits REQUIRED)
 
 add_executable(mtc_node 
     src/mtc_task_node.cpp
@@ -39,6 +40,7 @@ ament_target_dependencies(
   "gpd_ros"
   "tf2_geometry_msgs"
   "tf2_eigen"
+  "parameter_traits"
 )
 
 install(TARGETS mtc_node
