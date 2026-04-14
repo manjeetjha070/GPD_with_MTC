@@ -5,17 +5,8 @@
 #include <moveit/task_constructor/solvers.h>
 #include <moveit/task_constructor/stages.h>
 
-#if __has_include(<tf2_geometry_msgs/tf2_geometry_msgs.hpp>)
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#else
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
-#endif
-
-#if __has_include(<tf2_eigen/tf2_eigen.hpp>)
 #include <tf2_eigen/tf2_eigen.hpp>
-#else
-#include <tf2_eigen/tf2_eigen.h>
-#endif
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <tf2_ros/buffer.h>
@@ -134,10 +125,10 @@ void MTCTaskNode::doTask()
 
   task_.introspection().publishSolution(*task_.solutions().front());
 
-  auto result = task_.execute(*task_.solutions().front());
-  if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS) {
-    RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
-  }
+  // auto result = task_.execute(*task_.solutions().front());
+  // if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS) {
+  //   RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
+  // }
 }
 
 // ================= CREATE TASK =================
