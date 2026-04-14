@@ -10,6 +10,7 @@
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/transform_listener.h>
 #include <visualization_msgs/msg/marker.hpp>
 
@@ -21,6 +22,8 @@ MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
 {
   this->declare_parameter("velocity_scaling", 0.1);
   this->declare_parameter("acceleration_scaling", 0.1);
+
+  tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
   grasps_sub_ = this->create_subscription<gpd_ros::msg::GraspConfigList>(
       "clustered_grasps", 10, std::bind(&MTCTaskNode::graspsCallback, this, std::placeholders::_1));
@@ -76,7 +79,11 @@ void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr 
     tf_buffer_.transform(pose_in_object, pose_out_object, "world");
 
     latest_grasp_pose_ = pose_out;
+    // Use the latest grasp pose for the object pose, but offset x by 0.14
+    latest_grasp_pose_.pose.position.x += 0.14;  // Add offset to visualize grasp pose above the object
     latest_grasp_pose_object_ = pose_out_object;
+
+    publishTfFrames();
 
     // Update planning scene and execute task
     setupPlanningScene();
@@ -97,9 +104,9 @@ void MTCTaskNode::setupPlanningScene()
   object.primitives[0].type = shape_msgs::msg::SolidPrimitive::CYLINDER;
   object.primitives[0].dimensions = { 0.1, 0.02 };
 
-  // Use the latest grasp pose for the object pose, but offset x by 0.14
+  
   object.pose = latest_grasp_pose_object_.pose;
-  object.pose.position.x = latest_grasp_pose_object_.pose.position.x + 0.14;
+  
 
 
   moveit::planning_interface::PlanningSceneInterface psi;
@@ -129,6 +136,24 @@ void MTCTaskNode::doTask()
   // if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS) {
   //   RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
   // }
+}
+
+void MTCTaskNode::publishTfFrames()
+{
+  auto make_tf = [&](const std::string& child_frame, const geometry_msgs::msg::PoseStamped& pose) {
+    geometry_msgs::msg::TransformStamped tf_msg;
+    tf_msg.header.stamp = this->get_clock()->now();
+    tf_msg.header.frame_id = pose.header.frame_id;
+    tf_msg.child_frame_id = child_frame;
+    tf_msg.transform.translation.x = pose.pose.position.x;
+    tf_msg.transform.translation.y = pose.pose.position.y;
+    tf_msg.transform.translation.z = pose.pose.position.z;
+    tf_msg.transform.rotation = pose.pose.orientation;
+    tf_broadcaster_->sendTransform(tf_msg);
+  };
+
+  make_tf("latest_grasp_pose", latest_grasp_pose_);
+  make_tf("object_pose", latest_grasp_pose_object_);
 }
 
 // ================= CREATE TASK =================
