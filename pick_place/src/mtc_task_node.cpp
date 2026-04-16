@@ -44,50 +44,62 @@ void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr 
                                          return a.score.data < b.score.data;
                                        });
 
-    geometry_msgs::msg::PoseStamped pose_in;
-    pose_in.header = msg->header;
-    pose_in.pose.position = best_grasp->position;
+//------------------------------------ Transform GPD grasp pose for end effector to world frame ------------------------------//
+
+    geometry_msgs::msg::PoseStamped gpd_pose_camera;
+    gpd_pose_camera.header = msg->header;
+    gpd_pose_camera.pose.position = best_grasp->position;     
+
+    // Construct orientation from approach, binormal, axis for grasp pose
+    Eigen::Matrix3d rot;
+    rot.col(0) = Eigen::Vector3d(best_grasp->binormal.x, best_grasp->binormal.y, best_grasp->binormal.z);
+    rot.col(1) = Eigen::Vector3d(best_grasp->axis.x, best_grasp->axis.y, best_grasp->axis.z);
+    rot.col(2) = Eigen::Vector3d(best_grasp->approach.x, best_grasp->approach.y, best_grasp->approach.z);
+
+    Eigen::Quaterniond q(rot);
+    gpd_pose_camera.pose.orientation = tf2::toMsg(q);
+
+    // Update timestamps to current time to avoid TF extrapolation errors
+    gpd_pose_camera.header.stamp = this->get_clock()->now();
+    gpd_pose_camera.header.stamp.sec -= 1;
+
+    // Transform to world frame
+    geometry_msgs::msg::PoseStamped pose_out;
+    tf_buffer_.transform(gpd_pose_camera, pose_out, "world");
+
+    end_effector_pose_ = pose_out;
+    end_effector_pose_.pose.position.z += 0.16;  // Add offset to endeffector 
+
+//------------------------------------ Transform GPD grasp pose for selected object to world frame ------------------------------//
 
     geometry_msgs::msg::PoseStamped pose_in_object;
     pose_in_object.header = msg->header;
     pose_in_object.pose.position = best_grasp->position;
 
-    // Construct orientation from approach, binormal, axis for grasp pose
-    Eigen::Matrix3d rot;
-    rot.col(0) = Eigen::Vector3d(best_grasp->axis.x, best_grasp->axis.y, best_grasp->axis.z);
-    rot.col(1) = Eigen::Vector3d(best_grasp->approach.x, best_grasp->approach.y, best_grasp->approach.z);
-    rot.col(2) = Eigen::Vector3d(best_grasp->binormal.x, best_grasp->binormal.y, best_grasp->binormal.z);
-
     // Construct orientation from approach, binormal, axis for object pose
     Eigen::Matrix3d rot_object;
     rot_object.col(0) = Eigen::Vector3d(best_grasp->approach.x, best_grasp->approach.y, best_grasp->approach.z);
     rot_object.col(1) = Eigen::Vector3d(best_grasp->binormal.x, best_grasp->binormal.y, best_grasp->binormal.z);
-    rot_object.col(2) = Eigen::Vector3d(best_grasp->axis.x, best_grasp->axis.y, best_grasp->axis.z);
-    
-
-    Eigen::Quaterniond q(rot);
-    pose_in.pose.orientation = tf2::toMsg(q);
+    rot_object.col(2) = Eigen::Vector3d(best_grasp->axis.x, best_grasp->axis.y, best_grasp->axis.z);    
 
     Eigen::Quaterniond q_object(rot_object);
-    pose_in_object.pose.orientation = tf2::toMsg(q_object);
-
-    // Transform to world frame
-    geometry_msgs::msg::PoseStamped pose_out;
-    tf_buffer_.transform(pose_in, pose_out, "world");
-
+    pose_in_object.pose.orientation = tf2::toMsg(q_object); 
+    
+    // Update timestamps to current time to avoid TF extrapolation errors
+    pose_in_object.header.stamp = this->get_clock()->now();
+    pose_in_object.header.stamp.sec -= 1;
+    
+    // Transform to world frame                                    
     geometry_msgs::msg::PoseStamped pose_out_object;
-    tf_buffer_.transform(pose_in_object, pose_out_object, "world");
+    tf_buffer_.transform(pose_in_object, pose_out_object, "world");       
+    object_pose_ = pose_out_object;
 
-    latest_grasp_pose_ = pose_out;
-    // Use the latest grasp pose for the object pose, but offset x by 0.14
-    latest_grasp_pose_.pose.position.x += 0.14;  // Add offset to visualize grasp pose above the object
-    latest_grasp_pose_object_ = pose_out_object;
-
+//------------------Publish TF frames for visualization, Update planning scene and execute task ------------------------------//    
+    
     publishTfFrames();
-
-    // Update planning scene and execute task
     setupPlanningScene();
     doTask();
+
   } catch (tf2::TransformException &ex) {
     RCLCPP_WARN(LOGGER, "Could not transform pose: %s", ex.what());
   }
@@ -102,10 +114,8 @@ void MTCTaskNode::setupPlanningScene()
 
   object.primitives.resize(1);
   object.primitives[0].type = shape_msgs::msg::SolidPrimitive::CYLINDER;
-  object.primitives[0].dimensions = { 0.1, 0.02 };
-
-  
-  object.pose = latest_grasp_pose_object_.pose;
+  object.primitives[0].dimensions = { 0.1, 0.02 };  
+  object.pose = object_pose_.pose;
   
 
 
@@ -151,9 +161,9 @@ void MTCTaskNode::publishTfFrames()
     tf_msg.transform.rotation = pose.pose.orientation;
     tf_broadcaster_->sendTransform(tf_msg);
   };
-
-  make_tf("latest_grasp_pose", latest_grasp_pose_);
-  make_tf("object_pose", latest_grasp_pose_object_);
+  
+  make_tf("end_effector_pose", end_effector_pose_);
+  make_tf("object_pose", object_pose_);
 }
 
 // ================= CREATE TASK =================
@@ -246,41 +256,7 @@ mtc::Task MTCTaskNode::createTask()
       stage->setDirection(vec);
       grasp->insert(std::move(stage));
     }
-
-    /****************************************************
-  ---- *               Generate Grasp Pose                *
-     ***************************************************/
-    // {
-    //   // Sample grasp pose
-    //   auto stage = std::make_unique<mtc::stages::GenerateGraspPose>("generate grasp pose");
-    //   stage->properties().configureInitFrom(mtc::Stage::PARENT);
-    //   stage->properties().set("marker_ns", "grasp_pose");
-    //   stage->setPreGraspPose(open);
-    //   stage->setObject("object");
-    //   stage->setAngleDelta(M_PI / 12);
-    //   stage->setMonitoredStage(current_state_ptr);  // Hook into current state
-
-    //   // This is the transform from the object frame to the end-effector frame
-    //   Eigen::Isometry3d grasp_frame_transform;
-    //   Eigen::Quaterniond q = Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
-    //                          Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
-    //                          Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitZ());
-    //   grasp_frame_transform.linear() = q.matrix();
-    //   grasp_frame_transform.translation().z() = 0.14;
-
-    //   // Compute IK
-    //   // clang-format off
-    //   auto wrapper =
-    //       std::make_unique<mtc::stages::ComputeIK>("grasp pose IK", std::move(stage));
-    //   // clang-format on
-    //   wrapper->setMaxIKSolutions(8);
-    //   wrapper->setMinSolutionDistance(1.0);
-    //   wrapper->setIKFrame(grasp_frame_transform, hand_frame);
-    //   wrapper->properties().configureInitFrom(mtc::Stage::PARENT, { "eef", "group" });
-    //   wrapper->properties().configureInitFrom(mtc::Stage::INTERFACE, { "target_pose" });
-    //   grasp->insert(std::move(wrapper));
-    // }
-
+    
     /****************************************************
   ---- *            Use a Fixed GPD Grasp Pose           *
      ***************************************************/
@@ -292,18 +268,7 @@ mtc::Task MTCTaskNode::createTask()
       stage->properties().set("marker_ns", "grasp_pose");
       //stage->setMonitoredStage(current_state_ptr);  // Hook into current state
       stage->setMonitoredStage (open_state_ptr); // Hook into open state
-
-      // Use the latest grasp pose from the marker
-      stage->setPose(latest_grasp_pose_);
-
-
-      // This is the transform from the object frame to the end-effector frame
-      // Eigen::Isometry3d grasp_frame_transform;
-      // Eigen::Quaterniond q = Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
-      //                        Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
-      //                        Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitZ());
-      // grasp_frame_transform.linear() = q.matrix();
-      // grasp_frame_transform.translation().z() = 0.1;
+      stage->setPose(end_effector_pose_);
 
       // Compute IK      
       auto wrapper =
