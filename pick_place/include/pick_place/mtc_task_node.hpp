@@ -26,7 +26,6 @@ private:
   tf2_ros::Buffer tf_buffer_;
   tf2_ros::TransformListener tf_listener_;
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-  geometry_msgs::msg::PoseStamped end_effector_pose_;
   geometry_msgs::msg::PoseStamped object_pose_;
   rclcpp::Subscription<gpd_ros::msg::GraspConfigList>::SharedPtr grasps_sub_;
 

@@ -44,32 +44,6 @@ void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr 
                                          return a.score.data < b.score.data;
                                        });
 
-//------------------------------------ Transform GPD grasp pose for end effector to world frame ------------------------------//
-
-    geometry_msgs::msg::PoseStamped gpd_pose_camera;
-    gpd_pose_camera.header = msg->header;
-    gpd_pose_camera.pose.position = best_grasp->position;     
-
-    // Construct orientation from approach, binormal, axis for grasp pose
-    Eigen::Matrix3d rot;
-    rot.col(0) = Eigen::Vector3d(best_grasp->binormal.x, best_grasp->binormal.y, best_grasp->binormal.z);
-    rot.col(1) = Eigen::Vector3d(best_grasp->axis.x, best_grasp->axis.y, best_grasp->axis.z);
-    rot.col(2) = Eigen::Vector3d(best_grasp->approach.x, best_grasp->approach.y, best_grasp->approach.z);
-
-    Eigen::Quaterniond q(rot);
-    gpd_pose_camera.pose.orientation = tf2::toMsg(q);
-
-    // Update timestamps to current time to avoid TF extrapolation errors
-    gpd_pose_camera.header.stamp = this->get_clock()->now();
-    gpd_pose_camera.header.stamp.sec -= 1;
-
-    // Transform to world frame
-    geometry_msgs::msg::PoseStamped pose_out;
-    tf_buffer_.transform(gpd_pose_camera, pose_out, "world");
-
-    end_effector_pose_ = pose_out;
-    end_effector_pose_.pose.position.z += 0.16;  // Add offset to endeffector 
-
 //------------------------------------ Transform GPD grasp pose for selected object to world frame ------------------------------//
 
     geometry_msgs::msg::PoseStamped pose_in_object;
@@ -93,6 +67,7 @@ void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr 
     geometry_msgs::msg::PoseStamped pose_out_object;
     tf_buffer_.transform(pose_in_object, pose_out_object, "world");       
     object_pose_ = pose_out_object;
+    object_pose_.pose.position.x += 0.01; // Add small offset
 
 //------------------Publish TF frames for visualization, Update planning scene and execute task ------------------------------//    
     
@@ -142,10 +117,10 @@ void MTCTaskNode::doTask()
 
   task_.introspection().publishSolution(*task_.solutions().front());
 
-  // auto result = task_.execute(*task_.solutions().front());
-  // if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS) {
-  //   RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
-  // }
+  auto result = task_.execute(*task_.solutions().front());
+  if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS) {
+    RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
+  }
 }
 
 void MTCTaskNode::publishTfFrames()
@@ -162,7 +137,6 @@ void MTCTaskNode::publishTfFrames()
     tf_broadcaster_->sendTransform(tf_msg);
   };
   
-  make_tf("end_effector_pose", end_effector_pose_);
   make_tf("object_pose", object_pose_);
 }
 
@@ -268,7 +242,16 @@ mtc::Task MTCTaskNode::createTask()
       stage->properties().set("marker_ns", "grasp_pose");
       //stage->setMonitoredStage(current_state_ptr);  // Hook into current state
       stage->setMonitoredStage (open_state_ptr); // Hook into open state
-      stage->setPose(end_effector_pose_);
+      stage->setPose(object_pose_); // Use the transformed GPD grasp pose in world frame
+
+      // This is the transform from the object frame to the end-effector frame
+      Eigen::Isometry3d grasp_frame_transform;
+      Eigen::Quaterniond q = Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
+                             Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
+                             Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitZ());
+      grasp_frame_transform.linear() = q.matrix();
+      grasp_frame_transform.translation().z() = 0.14; // Adjust this offset based on your gripper geometry
+
 
       // Compute IK      
       auto wrapper =
@@ -276,7 +259,7 @@ mtc::Task MTCTaskNode::createTask()
       // clang-format on
       wrapper->setMaxIKSolutions(8);
       wrapper->setMinSolutionDistance(1.0);
-      wrapper->setIKFrame(hand_frame);
+      wrapper->setIKFrame(grasp_frame_transform, hand_frame);
       wrapper->properties().configureInitFrom(mtc::Stage::PARENT, { "eef", "group" });
       wrapper->properties().configureInitFrom(mtc::Stage::INTERFACE, { "target_pose" });
       grasp->insert(std::move(wrapper));
@@ -361,7 +344,8 @@ mtc::Task MTCTaskNode::createTask()
       stage->setObject("object");
 
       geometry_msgs::msg::PoseStamped target_pose_msg;
-      target_pose_msg.header.frame_id = "object";
+      target_pose_msg.header.frame_id = "world";
+      target_pose_msg.pose.position.x = 0.5;
       target_pose_msg.pose.position.y = 0.5;
       target_pose_msg.pose.orientation.w = 1.0;
       stage->setPose(target_pose_msg);
