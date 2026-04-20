@@ -172,6 +172,8 @@ mtc::Task MTCTaskNode::createTask()
   sampling_planner->setMaxVelocityScalingFactor(velocity_scaling);
   sampling_planner->setMaxAccelerationScalingFactor(acceleration_scaling);
   auto interpolation_planner = std::make_shared<mtc::solvers::JointInterpolationPlanner>();
+  interpolation_planner->setMaxVelocityScalingFactor(velocity_scaling);
+  interpolation_planner->setMaxAccelerationScalingFactor(acceleration_scaling);
 
   auto cartesian_planner = std::make_shared<mtc::solvers::CartesianPath>();
   cartesian_planner->setMaxVelocityScalingFactor(velocity_scaling);
@@ -246,9 +248,9 @@ mtc::Task MTCTaskNode::createTask()
 
       // This is the transform from the object frame to the end-effector frame
       Eigen::Isometry3d grasp_frame_transform;
-      Eigen::Quaterniond q = Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
+      Eigen::Quaterniond q = Eigen::AngleAxisd(-M_PI / 2, Eigen::Vector3d::UnitX()) *
                              Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
-                             Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitZ());
+                             Eigen::AngleAxisd(-M_PI / 2, Eigen::Vector3d::UnitZ());
       grasp_frame_transform.linear() = q.matrix();
       grasp_frame_transform.translation().z() = 0.14; // Adjust this offset based on your gripper geometry
 
@@ -264,9 +266,7 @@ mtc::Task MTCTaskNode::createTask()
       wrapper->properties().configureInitFrom(mtc::Stage::INTERFACE, { "target_pose" });
       grasp->insert(std::move(wrapper));
     }
-
-
-
+    
     {
       // clang-format off
       auto stage =
@@ -345,9 +345,8 @@ mtc::Task MTCTaskNode::createTask()
 
       geometry_msgs::msg::PoseStamped target_pose_msg;
       target_pose_msg.header.frame_id = "world";
-      target_pose_msg.pose.position.x = 0.5;
-      target_pose_msg.pose.position.y = 0.5;
-      target_pose_msg.pose.orientation.w = 1.0;
+      target_pose_msg.pose=object_pose_.pose;
+      target_pose_msg.pose.position.y += 0.5; // Offset the place position in y direction
       stage->setPose(target_pose_msg);
       stage->setMonitoredStage(attach_object_stage);  // Hook into attach_object_stage
 
