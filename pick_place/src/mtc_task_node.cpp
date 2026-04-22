@@ -65,7 +65,38 @@ void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr 
     
     // Transform to world frame                                    
     geometry_msgs::msg::PoseStamped pose_out_object;
-    tf_buffer_.transform(pose_in_object, pose_out_object, "world");       
+    tf_buffer_.transform(pose_in_object, pose_out_object, "world");  
+    // Convert to tf2
+    tf2::Quaternion q;
+    tf2::fromMsg(pose_out_object.pose.orientation, q);
+
+    tf2::Matrix3x3 m(q);
+
+    // Extract axes
+    tf2::Vector3 x_axis = m.getColumn(0);
+    tf2::Vector3 y_axis = m.getColumn(1);
+    tf2::Vector3 z_axis = m.getColumn(2);
+
+    // If Z is pointing downward → flip entire frame
+    if (z_axis.z() < 0) {
+        x_axis = -x_axis;
+        y_axis = -y_axis;
+        z_axis = -z_axis;
+    }
+
+    // Rebuild rotation matrix
+    tf2::Matrix3x3 m_new(
+        x_axis.x(), y_axis.x(), z_axis.x(),
+        x_axis.y(), y_axis.y(), z_axis.y(),
+        x_axis.z(), y_axis.z(), z_axis.z()
+    );
+
+    // Convert back to quaternion
+    tf2::Quaternion q_new;
+    m_new.getRotation(q_new);
+
+    pose_out_object.pose.orientation = tf2::toMsg(q_new);
+    
     object_pose_ = pose_out_object;
     object_pose_.pose.position.x += 0.01; // Add small offset
 
@@ -248,9 +279,9 @@ mtc::Task MTCTaskNode::createTask()
 
       // This is the transform from the object frame to the end-effector frame
       Eigen::Isometry3d grasp_frame_transform;
-      Eigen::Quaterniond q = Eigen::AngleAxisd(-M_PI / 2, Eigen::Vector3d::UnitX()) *
+      Eigen::Quaterniond q = Eigen::AngleAxisd((-M_PI )/ 2, Eigen::Vector3d::UnitX()) *
                              Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
-                             Eigen::AngleAxisd(-M_PI / 2, Eigen::Vector3d::UnitZ());
+                             Eigen::AngleAxisd((-M_PI) / 2, Eigen::Vector3d::UnitZ());
       grasp_frame_transform.linear() = q.matrix();
       grasp_frame_transform.translation().z() = 0.14; // Adjust this offset based on your gripper geometry
 
@@ -300,7 +331,7 @@ mtc::Task MTCTaskNode::createTask()
           std::make_unique<mtc::stages::MoveRelative>("lift object", cartesian_planner);
       // clang-format on
       stage->properties().configureInitFrom(mtc::Stage::PARENT, { "group" });
-      stage->setMinMaxDistance(0.1, 0.3);
+      stage->setMinMaxDistance(0.05, 0.3);
       stage->setIKFrame(hand_frame);
       stage->properties().set("marker_ns", "lift_object");
 
