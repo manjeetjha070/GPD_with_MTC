@@ -34,4 +34,6 @@ private:
   std::string open = "Open";
   std::string close = "Close";
   std::string home = "Home";
+
+  double z_sign;
 };

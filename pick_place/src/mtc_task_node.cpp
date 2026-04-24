@@ -5,6 +5,7 @@
 #include <moveit/task_constructor/solvers.h>
 #include <moveit/task_constructor/stages.h>
 
+#include <moveit/task_constructor/stages/generate_random_pose.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
 
@@ -77,28 +78,10 @@ void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr 
     tf2::Vector3 y_axis = m.getColumn(1);
     tf2::Vector3 z_axis = m.getColumn(2);
 
-    // If Z is pointing downward → flip entire frame
-    if (z_axis.z() < 0) {
-        x_axis = -x_axis;
-        y_axis = -y_axis;
-        z_axis = -z_axis;
-    }
-
-    // Rebuild rotation matrix
-    tf2::Matrix3x3 m_new(
-        x_axis.x(), y_axis.x(), z_axis.x(),
-        x_axis.y(), y_axis.y(), z_axis.y(),
-        x_axis.z(), y_axis.z(), z_axis.z()
-    );
-
-    // Convert back to quaternion
-    tf2::Quaternion q_new;
-    m_new.getRotation(q_new);
-
-    pose_out_object.pose.orientation = tf2::toMsg(q_new);
+    // store sign
+    z_sign = (z_axis.z() >= 0.0) ? 1.0 : -1.0;
     
     object_pose_ = pose_out_object;
-    object_pose_.pose.position.x += 0.01; // Add small offset
 
 //------------------Publish TF frames for visualization, Update planning scene and execute task ------------------------------//    
     
@@ -114,16 +97,33 @@ void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr 
 // ================= PLANNING SCENE =================
 void MTCTaskNode::setupPlanningScene()
 {
-  moveit_msgs::msg::CollisionObject object;
+   moveit_msgs::msg::CollisionObject object;
   object.id = "object";
   object.header.frame_id = "world";
 
   object.primitives.resize(1);
   object.primitives[0].type = shape_msgs::msg::SolidPrimitive::CYLINDER;
-  object.primitives[0].dimensions = { 0.1, 0.02 };  
-  object.pose = object_pose_.pose;
-  
+  object.primitives[0].dimensions = { 0.2, 0.04 };  
 
+  geometry_msgs::msg::Pose pose = object_pose_.pose;
+
+  // Define offset in local object frame (x direction)
+  tf2::Vector3 local_offset(0.05 , 0.0, 0.0);  // 5 cm along object's x
+
+  // Convert orientation to tf2
+  tf2::Quaternion q;
+  tf2::fromMsg(pose.orientation, q);
+
+  // Rotate offset into world frame
+  tf2::Vector3 world_offset = tf2::quatRotate(q, local_offset);
+
+  // Apply offset
+  pose.position.x += world_offset.x();
+  pose.position.y += world_offset.y();
+  pose.position.z += world_offset.z();
+
+  object.pose = pose;
+  object_pose_.pose=pose;
 
   moveit::planning_interface::PlanningSceneInterface psi;
   psi.applyCollisionObject(object);
@@ -259,7 +259,12 @@ mtc::Task MTCTaskNode::createTask()
       // Set hand forward direction
       geometry_msgs::msg::Vector3Stamped vec;
       vec.header.frame_id = hand_frame;
-      vec.vector.z = 1.0;
+      if (z_sign = 1) {
+       vec.vector.z = 1.0;
+      } else {
+        vec.vector.y = 1.0;
+      }
+      
       stage->setDirection(vec);
       grasp->insert(std::move(stage));
     }

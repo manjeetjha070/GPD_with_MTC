@@ -13,7 +13,7 @@ def generate_launch_description():
         output="screen",
         parameters=[
             moveit_config,
-            {'use_sim_time': False}
+            {'use_sim_time': True}
         ],
     )
 
