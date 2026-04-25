@@ -73,13 +73,13 @@ void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr 
 
     tf2::Matrix3x3 m(q);
 
-    // Extract axes
-    tf2::Vector3 x_axis = m.getColumn(0);
-    tf2::Vector3 y_axis = m.getColumn(1);
+    // Extract axes    
     tf2::Vector3 z_axis = m.getColumn(2);
 
     // store sign
     z_sign = (z_axis.z() >= 0.0) ? 1.0 : -1.0;
+    RCLCPP_INFO(LOGGER, "z_axis: [%.3f, %.3f, %.3f], sign: %.1f",
+            z_axis.x(), z_axis.y(), z_axis.z(), z_sign);
     
     object_pose_ = pose_out_object;
 
@@ -108,7 +108,7 @@ void MTCTaskNode::setupPlanningScene()
   geometry_msgs::msg::Pose pose = object_pose_.pose;
 
   // Define offset in local object frame (x direction)
-  tf2::Vector3 local_offset(0.05 , 0.0, 0.0);  // 5 cm along object's x
+  tf2::Vector3 local_offset(0.04 , 0.0, 0.0);  // 4 cm along object's x
 
   // Convert orientation to tf2
   tf2::Quaternion q;
@@ -258,12 +258,8 @@ mtc::Task MTCTaskNode::createTask()
 
       // Set hand forward direction
       geometry_msgs::msg::Vector3Stamped vec;
-      vec.header.frame_id = hand_frame;
-      if (z_sign = 1) {
-       vec.vector.z = 1.0;
-      } else {
-        vec.vector.y = 1.0;
-      }
+      vec.header.frame_id = hand_frame;      
+      vec.vector.z = 1.0;
       
       stage->setDirection(vec);
       grasp->insert(std::move(stage));
@@ -284,10 +280,18 @@ mtc::Task MTCTaskNode::createTask()
 
       // This is the transform from the object frame to the end-effector frame
       Eigen::Isometry3d grasp_frame_transform;
-      Eigen::Quaterniond q = Eigen::AngleAxisd((-M_PI )/ 2, Eigen::Vector3d::UnitX()) *
+      if (z_sign == 1) {
+       Eigen::Quaterniond q = Eigen::AngleAxisd((-M_PI )/ 2, Eigen::Vector3d::UnitX()) *
                              Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
                              Eigen::AngleAxisd((-M_PI) / 2, Eigen::Vector3d::UnitZ());
       grasp_frame_transform.linear() = q.matrix();
+      } else {
+        Eigen::Quaterniond q = Eigen::AngleAxisd((M_PI )/ 2, Eigen::Vector3d::UnitX()) *
+                             Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY()) *
+                             Eigen::AngleAxisd((M_PI) / 2, Eigen::Vector3d::UnitZ());
+      grasp_frame_transform.linear() = q.matrix();
+      }
+
       grasp_frame_transform.translation().z() = 0.14; // Adjust this offset based on your gripper geometry
 
 
