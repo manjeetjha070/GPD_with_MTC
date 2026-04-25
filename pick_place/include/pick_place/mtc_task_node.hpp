@@ -14,8 +14,7 @@ class MTCTaskNode : public rclcpp::Node
 {
 public:
   MTCTaskNode(const rclcpp::NodeOptions& options);
-
-  void doTask();
+  
   void setupPlanningScene();
 
 private:

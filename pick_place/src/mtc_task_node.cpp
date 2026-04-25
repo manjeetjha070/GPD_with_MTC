@@ -38,60 +38,90 @@ void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr 
     return;
   }
 
-  try {
-    // Find the grasp with the highest score
-    auto best_grasp = std::max_element(msg->grasps.begin(), msg->grasps.end(),
-                                       [](const auto& a, const auto& b) {
-                                         return a.score.data < b.score.data;
-                                       });
+  // Copy + sort grasps (highest score first)
+  std::vector<gpd_ros::msg::GraspConfig> grasps = msg->grasps;
 
-//------------------------------------ Transform GPD grasp pose for selected object to world frame ------------------------------//
+  std::sort(grasps.begin(), grasps.end(),
+            [](const auto& a, const auto& b) {
+              return a.score.data > b.score.data;
+            });
 
-    geometry_msgs::msg::PoseStamped pose_in_object;
-    pose_in_object.header = msg->header;
-    pose_in_object.pose.position = best_grasp->position;
+  for (size_t i = 0; i < grasps.size(); ++i) {
+    const auto& grasp = grasps[i];
 
-    // Construct orientation from approach, binormal, axis for object pose
-    Eigen::Matrix3d rot_object;
-    rot_object.col(0) = Eigen::Vector3d(best_grasp->approach.x, best_grasp->approach.y, best_grasp->approach.z);
-    rot_object.col(1) = Eigen::Vector3d(best_grasp->binormal.x, best_grasp->binormal.y, best_grasp->binormal.z);
-    rot_object.col(2) = Eigen::Vector3d(best_grasp->axis.x, best_grasp->axis.y, best_grasp->axis.z);    
+    RCLCPP_INFO(LOGGER, "Trying grasp %zu (score=%.3f)", i, grasp.score.data);
 
-    Eigen::Quaterniond q_object(rot_object);
-    pose_in_object.pose.orientation = tf2::toMsg(q_object); 
-    
-    // Update timestamps to current time to avoid TF extrapolation errors
-    pose_in_object.header.stamp = this->get_clock()->now();
-    pose_in_object.header.stamp.sec -= 1;
-    
-    // Transform to world frame                                    
-    geometry_msgs::msg::PoseStamped pose_out_object;
-    tf_buffer_.transform(pose_in_object, pose_out_object, "world");  
-    // Convert to tf2
-    tf2::Quaternion q;
-    tf2::fromMsg(pose_out_object.pose.orientation, q);
+    try {
+      // ---------------- Transform grasp ----------------
+      geometry_msgs::msg::PoseStamped pose_in_object;
+      pose_in_object.header = msg->header;
+      pose_in_object.pose.position = grasp.position;
 
-    tf2::Matrix3x3 m(q);
+      Eigen::Matrix3d rot_object;
+      rot_object.col(0) = Eigen::Vector3d(grasp.approach.x, grasp.approach.y, grasp.approach.z);
+      rot_object.col(1) = Eigen::Vector3d(grasp.binormal.x, grasp.binormal.y, grasp.binormal.z);
+      rot_object.col(2) = Eigen::Vector3d(grasp.axis.x, grasp.axis.y, grasp.axis.z);
 
-    // Extract axes    
-    tf2::Vector3 z_axis = m.getColumn(2);
+      Eigen::Quaterniond q_object(rot_object);
+      pose_in_object.pose.orientation = tf2::toMsg(q_object);
 
-    // store sign
-    z_sign = (z_axis.z() >= 0.0) ? 1.0 : -1.0;
-    RCLCPP_INFO(LOGGER, "z_axis: [%.3f, %.3f, %.3f], sign: %.1f",
-            z_axis.x(), z_axis.y(), z_axis.z(), z_sign);
-    
-    object_pose_ = pose_out_object;
+      pose_in_object.header.stamp = this->get_clock()->now();
+      pose_in_object.header.stamp.sec -= 1;  // Use an older timestamp to ensure the transform is available
 
-//------------------Publish TF frames for visualization, Update planning scene and execute task ------------------------------//    
-    
-    publishTfFrames();
-    setupPlanningScene();
-    doTask();
+      geometry_msgs::msg::PoseStamped pose_out_object;
+      tf_buffer_.transform(pose_in_object, pose_out_object, "world");
 
-  } catch (tf2::TransformException &ex) {
-    RCLCPP_WARN(LOGGER, "Could not transform pose: %s", ex.what());
+      // -------- compute z_sign --------
+      tf2::Quaternion q;
+      tf2::fromMsg(pose_out_object.pose.orientation, q);
+      tf2::Matrix3x3 m(q);
+      tf2::Vector3 z_axis = m.getColumn(2);
+      z_sign = (z_axis.z() >= 0.0) ? 1.0 : -1.0;
+
+      object_pose_ = pose_out_object;
+
+      // ---------------- Reset planning scene ----------------
+      moveit::planning_interface::PlanningSceneInterface psi;
+      psi.removeCollisionObjects({"object"});
+
+      // ---------------- Setup + plan ----------------
+      publishTfFrames();
+      setupPlanningScene();
+
+      task_ = createTask();
+
+      try {
+        task_.init();
+      } catch (mtc::InitStageException& e) {
+        RCLCPP_WARN(LOGGER, "Init failed for grasp %zu", i);
+        continue;
+      }
+
+      if (!task_.plan(5)) {
+        RCLCPP_WARN(LOGGER, "Planning failed for grasp %zu", i);
+        continue;
+      }
+
+      RCLCPP_INFO(LOGGER, "Planning SUCCESS for grasp %zu", i);
+
+      task_.introspection().publishSolution(*task_.solutions().front());
+
+      auto result = task_.execute(*task_.solutions().front());
+
+      if (result.val == moveit_msgs::msg::MoveItErrorCodes::SUCCESS) {
+        RCLCPP_INFO(LOGGER, "Execution SUCCESS for grasp %zu", i);
+      } else {
+        RCLCPP_WARN(LOGGER, "Execution failed for grasp %zu", i);
+      }
+      return;  // Exit after first successful grasp
+
+    } catch (tf2::TransformException &ex) {
+      RCLCPP_WARN(LOGGER, "TF failed for grasp %zu: %s", i, ex.what());
+      continue;
+    }
   }
+
+  RCLCPP_ERROR(LOGGER, "All grasps failed");
 }
 
 // ================= PLANNING SCENE =================
@@ -127,31 +157,6 @@ void MTCTaskNode::setupPlanningScene()
 
   moveit::planning_interface::PlanningSceneInterface psi;
   psi.applyCollisionObject(object);
-}
-
-// ================= EXECUTE TASK =================
-void MTCTaskNode::doTask()
-{
-  task_ = createTask();
-
-  try {
-    task_.init();
-  } catch (mtc::InitStageException& e) {
-    RCLCPP_ERROR_STREAM(LOGGER, e);
-    return;
-  }
-
-  if (!task_.plan(5)) {
-    RCLCPP_ERROR_STREAM(LOGGER, "Task planning failed");
-    return;
-  }
-
-  task_.introspection().publishSolution(*task_.solutions().front());
-
-  auto result = task_.execute(*task_.solutions().front());
-  if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS) {
-    RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
-  }
 }
 
 void MTCTaskNode::publishTfFrames()
