@@ -37,6 +37,7 @@ def launch_setup(context, *args, **kwargs):
     launch_rviz = LaunchConfiguration("launch_rviz")
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_internal_bus_gripper_comm = LaunchConfiguration("use_internal_bus_gripper_comm")
+    vision = LaunchConfiguration("vision")
 
     launch_arguments = {
         "robot_ip": robot_ip,
@@ -47,16 +48,23 @@ def launch_setup(context, *args, **kwargs):
         "gripper_max_velocity": gripper_max_velocity,
         "gripper_max_force": gripper_max_force,
         "use_internal_bus_gripper_comm": use_internal_bus_gripper_comm,
+        "vision": vision,
     }
 
     moveit_config = (
-        MoveItConfigsBuilder("gen3", package_name="kinova_gen3_6dof_robotiq_2f_85_moveit_config")
+        MoveItConfigsBuilder("gen3", package_name="kinova_gen3_6dof_robotiq_2f_85_moveit_config_1")
         .robot_description(mappings=launch_arguments)
         .trajectory_execution(file_path="config/moveit_controllers.yaml")
         .planning_scene_monitor(
             publish_robot_description=True, publish_robot_description_semantic=True
         )
         .planning_pipelines(pipelines=["ompl"])
+        .sensors_3d(
+            file_path=os.path.join(
+                get_package_share_directory("kinova_gen3_6dof_robotiq_2f_85_moveit_config_1"),
+                "config/sensors_3d.yaml",
+            )
+        )
         .to_moveit_configs()
     )
 
@@ -69,6 +77,7 @@ def launch_setup(context, *args, **kwargs):
         parameters=[
             moveit_config.to_dict(),
             {"default_planning_pipeline": "ompl"},
+            {"capabilities": "move_group/ExecuteTaskSolutionCapability"},
         ],
     )
 
@@ -191,6 +200,7 @@ def generate_launch_description():
     declared_arguments.append(
         DeclareLaunchArgument(
             "robot_ip",
+            default_value="131.234.152.30",
             description="IP address by which the robot can be reached.",
         )
     )
@@ -228,6 +238,14 @@ def generate_launch_description():
             "use_sim_time",
             default_value="false",
             description="Use simulated clock",
+        )
+    )
+
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "vision",
+            default_value="true",
+            description="Use vision",
         )
     )
 
