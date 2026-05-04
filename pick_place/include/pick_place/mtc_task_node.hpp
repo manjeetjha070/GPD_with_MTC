@@ -19,6 +19,8 @@ public:
 
 private:
   mtc::Task createTask();
+  double computeGraspScore(const gpd_ros::msg::GraspConfig& grasp,
+                         const geometry_msgs::msg::PoseStamped& pose_world, double max_gpd);
   void graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr msg);
 
   mtc::Task task_;
