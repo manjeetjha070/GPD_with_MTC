@@ -23,11 +23,66 @@ MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
 {
   this->declare_parameter("velocity_scaling", 0.1);
   this->declare_parameter("acceleration_scaling", 0.1);
+  this->declare_parameter("w_gpd", 1.0);
+  this->declare_parameter("w_height", 0.5);
+  this->declare_parameter("w_top", 0.8);
+  this->declare_parameter("w_dist", 0.3);
 
   tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
   grasps_sub_ = this->create_subscription<gpd_ros::msg::GraspConfigList>(
       "clustered_grasps", 10, std::bind(&MTCTaskNode::graspsCallback, this, std::placeholders::_1));
+}
+
+double MTCTaskNode::computeGraspScore(const gpd_ros::msg::GraspConfig& grasp,
+                         const geometry_msgs::msg::PoseStamped& pose_world, double max_gpd)
+{
+  // ---- weights (tune these!) ----
+  const double w_gpd = this->get_parameter("w_gpd").as_double();
+  const double w_height = this->get_parameter("w_height").as_double();
+  const double w_top = this->get_parameter("w_top").as_double();
+  const double w_dist = this->get_parameter("w_dist").as_double();
+
+  // ---- 1. GPD score ----
+  double gpd_score = grasp.score.data;
+  double gpd_score_normalized = (gpd_score) / (max_gpd + 1e-6);  // Normalize to [0,1]
+
+  // ---- 2. Height (prefer higher grasps) ----
+  double height = pose_world.pose.position.z;
+
+  // ---- 3. Top-down preference ----
+  // approach vector from GPD
+  Eigen::Vector3d approach(grasp.approach.x,
+                           grasp.approach.y,
+                           grasp.approach.z);
+
+  approach.normalize();
+
+  // prefer alignment with -Z (downward grasp)
+  Eigen::Vector3d world_down(0, 0, -1);
+  double top_score = approach.dot(world_down);  // [-1,1]
+
+  // normalize to [0,1]
+  top_score = (top_score + 1.0) / 2.0;
+
+  // ---- 4. Distance penalty (simple proxy) ----
+  // distance from robot base (you can improve this later)
+  double dist = std::sqrt(
+      pose_world.pose.position.x * pose_world.pose.position.x +
+      pose_world.pose.position.y * pose_world.pose.position.y +
+      pose_world.pose.position.z * pose_world.pose.position.z);
+
+  // invert so closer = higher score
+  double dist_score = 1.0 / (1.0 + dist);
+
+  // ---- Final score ----
+  double final_score =
+      w_gpd * gpd_score_normalized +
+      w_height * height +
+      w_top * top_score +
+      w_dist * dist_score;
+
+  return final_score;
 }
 
 // ================= GRASPS CALLBACK =================
@@ -41,15 +96,57 @@ void MTCTaskNode::graspsCallback(const gpd_ros::msg::GraspConfigList::SharedPtr 
   // Copy + sort grasps (highest score first)
   std::vector<gpd_ros::msg::GraspConfig> grasps = msg->grasps;
 
-  std::sort(grasps.begin(), grasps.end(),
+  double max_gpd = std::numeric_limits<double>::lowest();
+
+  for (const auto& g : grasps) {
+    max_gpd = std::max(max_gpd, (double)g.score.data);
+  }
+
+  std::vector<std::pair<double, gpd_ros::msg::GraspConfig>> scored_grasps;
+
+  for (const auto& grasp : msg->grasps) {
+    try {
+      // --- build pose (same as your code) ---
+      geometry_msgs::msg::PoseStamped pose_in;
+      pose_in.header = msg->header;
+      pose_in.pose.position = grasp.position;
+
+      Eigen::Matrix3d rot;
+      rot.col(0) = Eigen::Vector3d(grasp.approach.x, grasp.approach.y, grasp.approach.z);
+      rot.col(1) = Eigen::Vector3d(grasp.binormal.x, grasp.binormal.y, grasp.binormal.z);
+      rot.col(2) = Eigen::Vector3d(grasp.axis.x, grasp.axis.y, grasp.axis.z);
+
+      Eigen::Quaterniond q(rot);
+      pose_in.pose.orientation = tf2::toMsg(q);
+
+      pose_in.header.stamp = this->get_clock()->now();
+      pose_in.header.stamp.sec -= 1;
+
+      geometry_msgs::msg::PoseStamped pose_world;
+      tf_buffer_.transform(pose_in, pose_world, "world");
+
+      // --- compute combined score ---
+      double score = computeGraspScore(grasp, pose_world, max_gpd);
+
+      scored_grasps.emplace_back(score, grasp);
+
+    } catch (tf2::TransformException &ex) {
+      continue;
+    }
+  }
+
+  // ---- sort by combined score ----
+  std::sort(scored_grasps.begin(), scored_grasps.end(),
             [](const auto& a, const auto& b) {
-              return a.score.data > b.score.data;
+              return a.first > b.first;
             });
 
-  for (size_t i = 0; i < grasps.size(); ++i) {
-    const auto& grasp = grasps[i];
+  for (size_t i = 0; i < scored_grasps.size(); ++i) {
+    const auto& grasp = scored_grasps[i].second;
+    double combined_score = scored_grasps[i].first;
 
-    RCLCPP_INFO(LOGGER, "Trying grasp %zu (score=%.3f)", i, grasp.score.data);
+    RCLCPP_INFO(LOGGER, "Trying grasp %zu (combined=%.3f, gpd=%.3f)",
+              i, combined_score, grasp.score.data);
 
     try {
       // ---------------- Transform grasp ----------------
@@ -391,7 +488,7 @@ mtc::Task MTCTaskNode::createTask()
       geometry_msgs::msg::PoseStamped target_pose_msg;
       target_pose_msg.header.frame_id = "world";
       target_pose_msg.pose=object_pose_.pose;
-      target_pose_msg.pose.position.y += 0.5; // Offset the place position in y direction
+      target_pose_msg.pose.position.y += 0.2; // Offset the place position in y direction
       stage->setPose(target_pose_msg);
       stage->setMonitoredStage(attach_object_stage);  // Hook into attach_object_stage
 

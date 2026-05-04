@@ -70,7 +70,7 @@ def generate_launch_description():
         )
         .planning_pipelines(pipelines=["ompl", "pilz_industrial_motion_planner"])
         .sensors_3d(
-           file_path=os.path.join(get_package_share_directory("pick_place"), "config", "sensors_3d.yaml") 
+           file_path=os.path.join(get_package_share_directory("kinova_gen3_6dof_robotiq_2f_85_moveit_config_1"), "config", "sensors_3d.yaml") 
         )
         .to_moveit_configs()
     )
