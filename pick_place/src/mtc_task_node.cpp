@@ -489,6 +489,7 @@ mtc::Task MTCTaskNode::createTask()
       target_pose_msg.header.frame_id = "world";
       target_pose_msg.pose=object_pose_.pose;
       target_pose_msg.pose.position.y += 0.2; // Offset the place position in y direction
+      target_pose_msg.pose.position.z = 0.1; // Set a fixed height for placing
       stage->setPose(target_pose_msg);
       stage->setMonitoredStage(attach_object_stage);  // Hook into attach_object_stage
 
@@ -534,14 +535,14 @@ mtc::Task MTCTaskNode::createTask()
     {
       auto stage = std::make_unique<mtc::stages::MoveRelative>("retreat", cartesian_planner);
       stage->properties().configureInitFrom(mtc::Stage::PARENT, { "group" });
-      stage->setMinMaxDistance(0.1, 0.3);
+      stage->setMinMaxDistance(0.05, 0.3);
       stage->setIKFrame(hand_frame);
       stage->properties().set("marker_ns", "retreat");
 
       // Set retreat direction
       geometry_msgs::msg::Vector3Stamped vec;
       vec.header.frame_id = "world";
-      vec.vector.x = -0.5;
+      vec.vector.z = 0.05;
       stage->setDirection(vec);
       place->insert(std::move(stage));
     }
@@ -551,7 +552,7 @@ mtc::Task MTCTaskNode::createTask()
   {
     auto stage = std::make_unique<mtc::stages::MoveTo>("return home", interpolation_planner);
     stage->properties().configureInitFrom(mtc::Stage::PARENT, { "group" });
-    stage->setGoal(home);
+    stage->setGoal(top_down);
     task.add(std::move(stage));
   }
   return task;

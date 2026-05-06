@@ -35,6 +35,7 @@ private:
   std::string open = "Open";
   std::string close = "Close";
   std::string home = "Home";
+  std::string top_down = "top_down";
 
   double z_sign;
 };

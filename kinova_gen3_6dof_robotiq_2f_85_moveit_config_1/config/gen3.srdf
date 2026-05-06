@@ -64,6 +64,14 @@
         <joint name="joint_5" value="-1.6244707107543945"/>
         <joint name="joint_6" value="1.5707274675369263"/>
     </group_state>
+    <group_state name="place" group="manipulator">
+        <joint name="joint_1" value="-1.531174348728916"/>
+        <joint name="joint_2" value="1.409422346857654"/>
+        <joint name="joint_3" value="-1.7763215228640181"/>
+        <joint name="joint_4" value="0.0645870118849261"/>
+        <joint name="joint_5" value="1.6382382182400632"/>
+        <joint name="joint_6" value="1.5367747101852431"/>
+    </group_state>
     <group_state name="Open" group="gripper">
         <joint name="robotiq_85_left_knuckle_joint" value="0"/>
     </group_state>

@@ -3,7 +3,7 @@ from launch_ros.actions import Node
 from moveit_configs_utils import MoveItConfigsBuilder
 
 def generate_launch_description():
-    moveit_config = MoveItConfigsBuilder("kinova_gen3_6dof_robotiq_2f_85").to_dict()
+    moveit_config = MoveItConfigsBuilder("gen3", package_name="kinova_gen3_6dof_robotiq_2f_85_moveit_config_1").to_dict()
     #moveit_config = MoveItConfigsBuilder("moveit_resources_panda").to_dict()
 
     # MTC Demo node
@@ -13,7 +13,7 @@ def generate_launch_description():
         output="screen",
         parameters=[
             moveit_config,
-            {'use_sim_time': True}
+            {'use_sim_time': False}
         ],
     )
 
