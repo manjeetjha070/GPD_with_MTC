@@ -488,7 +488,7 @@ mtc::Task MTCTaskNode::createTask()
       geometry_msgs::msg::PoseStamped target_pose_msg;
       target_pose_msg.header.frame_id = "world";
       target_pose_msg.pose=object_pose_.pose;
-      target_pose_msg.pose.position.y += 0.2; // Offset the place position in y direction
+      target_pose_msg.pose.position.y += 0.5; // Offset the place position in y direction
       target_pose_msg.pose.position.z = 0.1; // Set a fixed height for placing
       stage->setPose(target_pose_msg);
       stage->setMonitoredStage(attach_object_stage);  // Hook into attach_object_stage

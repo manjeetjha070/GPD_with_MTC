@@ -9,4 +9,4 @@ camera_1_pointcloud:
     padding_scale: 1.0
     max_update_rate: 5.0
     filtered_cloud_topic: /camera/depth/color/points_filtered
-octomap_resolution: 0.01
+octomap_resolution: 0.05
