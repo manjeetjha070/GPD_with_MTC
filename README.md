@@ -21,7 +21,7 @@ This repository contains three ROS 2 packages:
   ROS 2 wrapper around GPD for grasp detection from point clouds.
 
 - `kinova_gen3_6dof_robotiq_2f_85_moveit_config_1`  
-  MoveIt 2 configuration package for Kinova Gen3 + Robotiq gripper.
+  Modified MoveIt 2 configuration package for Kinova Gen3 + Robotiq gripper.
 
 - `pick_place`  
   Pick-and-place pipeline using MoveIt Task Constructor (MTC).
@@ -74,7 +74,6 @@ git clone https://github.com/manjeetjha070/GPD_with_MTC.git
 
 ---
 
-
 ## Build Workspace
 
 ```bash
@@ -88,7 +87,7 @@ colcon build --symlink-install
 ## Source Workspace
 
 ```bash
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/$ROS_DISTRO/setup.bash
 source ~/ros2_ws/install/setup.bash
 ```
 
@@ -102,9 +101,142 @@ Launch the Kinova Gen3 robot and MoveIt 2 configuration:
 ros2 launch kinova_gen3_6dof_robotiq_2f_85_moveit_config_1 robot.launch.py
 ```
 
-More details about the robot launch configuration can be found in the official Kinova ROS 2 repository:
+More details about the original robot configuration can be found in the official Kinova ROS 2 repository:
 
 https://github.com/Kinovarobotics/ros2_kortex
+
+---
+
+## Modified MoveIt Configuration
+
+The package `kinova_gen3_6dof_robotiq_2f_85_moveit_config_1` is based on the
+official Kinova MoveIt 2 configuration package with additional modifications
+required for grasp execution and octomap-based collision avoidance.
+
+### Added 3D Sensor Configuration
+
+A `sensors_3d.yaml` file was added to enable octomap updates from the depth camera.
+
+```yaml
+sensors:
+  - camera_1_pointcloud
+
+camera_1_pointcloud:
+    sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
+    point_cloud_topic: /camera/depth/color/points
+    max_range: 2.0
+    point_subsample: 1
+    padding_offset: 0.1
+    padding_scale: 1.0
+    max_update_rate: 5.0
+    filtered_cloud_topic: /camera/depth/color/points_filtered
+
+octomap_resolution: 0.05
+```
+
+This configuration enables:
+
+- real-time octomap generation
+- collision-aware motion planning
+- obstacle updates from the RGB-D camera point cloud
+
+---
+
+### Added Predefined Robot States
+
+Additional robot poses were added in the SRDF file for the manipulation pipeline.
+
+```xml
+<group_state name="pick" group="manipulator">
+    <joint name="joint_1" value="1.625808408789453e-06"/>
+    <joint name="joint_2" value="-0.45021870732307434"/>
+    <joint name="joint_3" value="-1.3422857522964478"/>
+    <joint name="joint_4" value="-5.772884105681442e-05"/>
+    <joint name="joint_5" value="-1.6796354055404663"/>
+    <joint name="joint_6" value="1.570702314376831"/>
+</group_state>
+
+<group_state name="top_down" group="manipulator">
+    <joint name="joint_1" value="-3.2851510241016513e-06"/>
+    <joint name="joint_2" value="0.05423645302653313"/>
+    <joint name="joint_3" value="-1.2926411628723145"/>
+    <joint name="joint_4" value="-6.772646156605333e-05"/>
+    <joint name="joint_5" value="-1.6244707107543945"/>
+    <joint name="joint_6" value="1.5707274675369263"/>
+</group_state>
+
+<group_state name="place" group="manipulator">
+    <joint name="joint_1" value="-1.531174348728916"/>
+    <joint name="joint_2" value="1.409422346857654"/>
+    <joint name="joint_3" value="-1.7763215228640181"/>
+    <joint name="joint_4" value="0.0645870118849261"/>
+    <joint name="joint_5" value="1.6382382182400632"/>
+    <joint name="joint_6" value="1.5367747101852431"/>
+</group_state>
+```
+
+These states are used by the MoveIt Task Constructor (MTC) pipeline for:
+
+- pre-grasp motion
+- top-down grasp approach
+- place motion execution
+
+---
+
+### Modified Launch Configuration
+
+The MoveIt launch file was modified to:
+
+- load the 3D sensor configuration
+- enable octomap updates
+- enable MTC task execution capability
+
+```python
+moveit_config = (
+    MoveItConfigsBuilder(
+        "gen3",
+        package_name="kinova_gen3_6dof_robotiq_2f_85_moveit_config_1"
+    )
+    .robot_description(mappings=launch_arguments)
+    .trajectory_execution(file_path="config/moveit_controllers.yaml")
+    .planning_scene_monitor(
+        publish_robot_description=True,
+        publish_robot_description_semantic=True
+    )
+    .planning_pipelines(pipelines=["ompl"])
+    .sensors_3d(
+        file_path=os.path.join(
+            get_package_share_directory(
+                "kinova_gen3_6dof_robotiq_2f_85_moveit_config_1"
+            ),
+            "config/sensors_3d.yaml",
+        )
+    )
+    .to_moveit_configs()
+)
+
+moveit_config.moveit_cpp.update(
+    {"use_sim_time": use_sim_time.perform(context) == "true"}
+)
+
+move_group_node = Node(
+    package="moveit_ros_move_group",
+    executable="move_group",
+    output="screen",
+    parameters=[
+        moveit_config.to_dict(),
+        {"default_planning_pipeline": "ompl"},
+        {"capabilities": "move_group/ExecuteTaskSolutionCapability"},
+    ],
+)
+```
+
+These modifications are required for:
+
+- octomap-based collision checking
+- point cloud integration
+- MoveIt Task Constructor execution support
+- autonomous pick-and-place planning
 
 ---
 
@@ -119,20 +251,42 @@ ros2 launch gpd_ros ur5.launch.py
 The node subscribes to the point cloud topic and waits for grasp detection requests.
 
 ---
+
 ## Parameters
 
-Brief explanations of parameters are given in [cfg/eigen_params.cfg](gpd_ros/config/ros_eigen_params.cfg).
+Brief explanations of parameters are given in:
 
-The two parameters that you typically want to play with to **improve the
-number of grasps found** are *workspace* and *num_samples*. The first defines the
-volume of space in which to search for grasps as a cuboid of dimensions [minX,
-maxX, minY, maxY, minZ, maxZ], centered at the origin of the point cloud frame.
-The second is the number of samples that are drawn from the point cloud to
-detect grasps. You should set the workspace as small as possible and the number
-of samples as large as possible.
+```bash
+gpd_ros/config/ros_eigen_params.cfg
+```
 
-Most of the code is parallelized. To **improve runtime**, set *num_threads* to 
-the number of (physical) CPU cores that your computer has available.
+The two parameters that you typically want to tune to improve grasp detection are:
+
+- `workspace`
+- `num_samples`
+
+`workspace` defines the 3D search volume:
+
+```text
+[minX, maxX, minY, maxY, minZ, maxZ]
+```
+
+`num_samples` defines the number of sampled points used for grasp generation.
+
+Recommendations:
+
+- keep the workspace as small as possible
+- increase `num_samples` for better grasp coverage
+
+To improve runtime, set:
+
+```text
+num_threads
+```
+
+to the number of physical CPU cores available.
+
+---
 
 # 4) Run Pick and Place Pipeline
 
@@ -158,7 +312,7 @@ Once the full system is running, call the grasp detection service:
 ros2 service call /detect_grasps std_srvs/srv/Trigger
 ```
 
-The workflow is:
+Workflow:
 
 1. GPD detects grasp candidates from the point cloud
 2. Grasp poses are published
@@ -194,7 +348,7 @@ This issue is related to aggressive compiler optimization flags used by GPD.
 
 Related upstream issue:
 
-- https://github.com/atenpas/gpd/issues/141
+https://github.com/atenpas/gpd/issues/141
 
 ### Fix
 
@@ -211,6 +365,8 @@ set(CMAKE_CXX_FLAGS "-O3 -fPIC -fopenmp -Wno-deprecated -Wenum-compare -Wno-igno
 ```
 
 Removing CPU-specific optimization flags resolves the issue on Ubuntu 24.04 / ROS 2 Jazzy systems.
+
+---
 
 ## GPD Library Not Found
 
