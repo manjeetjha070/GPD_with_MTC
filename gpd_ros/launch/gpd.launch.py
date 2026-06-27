@@ -1,7 +1,16 @@
+import os
+
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
+    config_file = os.path.join(
+        get_package_share_directory('gpd_ros'),
+        'config',
+        'ros_eigen_params.cfg'
+    )
+
     return LaunchDescription([
         Node(
             package='gpd_ros',
@@ -12,8 +21,7 @@ def generate_launch_description():
                 
                 'cloud_topic': '/camera/depth/color/points',
 
-                # Filepath to the configuration file for GPD
-                'config_file': '/home/pg/rrs_ss25/manjeet/ros/src/GPD_with_MTC/gpd_ros/config/ros_eigen_params.cfg',
+                'config_file' : config_file,
 
                 # RViz topic to publish grasps
                 'rviz_topic': 'plot_grasps',

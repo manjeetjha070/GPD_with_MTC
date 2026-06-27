@@ -37,7 +37,7 @@ find_package(rosidl_default_generators REQUIRED)
 
 find_library(GPD_LIB
   NAMES gpd
-  PATHS /home/pg/rrs_ss25/manjeet/libs/gpd_install/
+  PATHS /home/pg/rrs_ss25/manjeet/libs/gpd_install/ # Adjust this path to where you have installed the GPD library
   #PATHS /usr/local/lib
   PATH_SUFFIXES lib
   NO_DEFAULT_PATH
@@ -74,7 +74,7 @@ rosidl_get_typesupport_target(cpp_typesupport_target
 # ------------------------------------------------------------------------------
 
 add_library(${PROJECT_NAME}_grasp_messages
-  src/grasp_messages.cpp
+  src/GraspMessages.cpp
 )
 
 # Include dirs for libraries
@@ -106,7 +106,7 @@ ament_target_dependencies(${PROJECT_NAME}_grasp_messages
 # ------------------------------------------------------------------------------
 
 add_library(${PROJECT_NAME}_grasp_plotter
-  src/grasp_plotter.cpp
+  src/GraspPlotter.cpp
 )
 
 target_include_directories(${PROJECT_NAME}_grasp_plotter PRIVATE
@@ -131,7 +131,7 @@ ament_target_dependencies(${PROJECT_NAME}_grasp_plotter
 # detect_grasps node
 # ------------------------------------------------------------------------------
 add_executable(detect_grasps
-  src/grasp_detection_node.cpp
+  src/GraspDetectionNode.cpp
   src/main.cpp
 )
 
@@ -178,7 +178,7 @@ install(DIRECTORY launch/
 )
 
 install(DIRECTORY config/
-  DESTINATION share/${PROJECT_NAME}/launch
+  DESTINATION share/${PROJECT_NAME}/config
 )
 
 ament_package()

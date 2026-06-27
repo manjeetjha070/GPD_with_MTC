@@ -1,4 +1,4 @@
-#include "gpd_ros/grasp_detection_node.hpp"
+#include "gpd_ros/GraspDetectionNode.h"
 
 int main(int argc, char** argv)
 {

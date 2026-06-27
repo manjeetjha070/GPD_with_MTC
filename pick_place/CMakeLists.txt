@@ -18,7 +18,7 @@ find_package(tf2_eigen REQUIRED)
 find_package(parameter_traits REQUIRED)
 
 add_executable(mtc_node 
-    src/mtc_task_node.cpp
+    src/MTCTaskNode.cpp
     src/main.cpp
 )
 
@@ -48,7 +48,6 @@ install(TARGETS mtc_node
 
 install(DIRECTORY
     launch
-    config
       DESTINATION share/${PROJECT_NAME}
   )
 
