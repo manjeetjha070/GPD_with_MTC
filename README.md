@@ -31,7 +31,7 @@ This repository contains three ROS 2 packages:
 
 ## a) Install GPD Locally
 
-GPD must be installed locally due to shared system constraints.
+GPD must be installed locally due to shared system constraints (optional:- Instead of local installation, you can also install globally following the official instruction https://github.com/atenpas/gpd#install )
 
 ### Clone and Build GPD
 
