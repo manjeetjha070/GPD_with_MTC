@@ -77,7 +77,7 @@ make install
 ```bash
 mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src
-git clone https://git.uni-paderborn.de/rescue-robots/pg/ws-2025-26/gpd_with_mtc.git
+git clone https://github.com/manjeetjha070/GPD_with_MTC.git
 cd ~/ros2_ws
 colcon build --symlink-install
 source /opt/ros/jazzy/setup.bash
